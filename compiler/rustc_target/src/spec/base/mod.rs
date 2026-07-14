@@ -34,6 +34,7 @@ pub(crate) mod solid;
 pub(crate) mod teeos;
 pub(crate) mod uefi_msvc;
 pub(crate) mod unikraft_linux_musl;
+pub(crate) mod void;
 pub(crate) mod vxworks;
 pub(crate) mod wasm;
 pub(crate) mod windows_gnu;

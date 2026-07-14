@@ -1718,6 +1718,7 @@ supported_targets! {
     ("riscv64im-unknown-none-elf", riscv64im_unknown_none_elf),
     ("riscv64imac-unknown-none-elf", riscv64imac_unknown_none_elf),
     ("riscv64gc-unknown-none-elf", riscv64gc_unknown_none_elf),
+    ("riscv64gc-unknown-void-elf", riscv64gc_unknown_void_elf),
     ("riscv64gc-unknown-linux-gnu", riscv64gc_unknown_linux_gnu),
     ("riscv64gc-unknown-linux-musl", riscv64gc_unknown_linux_musl),
     ("riscv64a23-unknown-linux-gnu", riscv64a23_unknown_linux_gnu),
@@ -1798,6 +1799,7 @@ supported_targets! {
     ("armv7-unknown-linux-uclibceabihf", armv7_unknown_linux_uclibceabihf),
 
     ("x86_64-unknown-none", x86_64_unknown_none),
+    ("x86_64-unknown-void", x86_64_unknown_void),
 
     ("aarch64-unknown-teeos", aarch64_unknown_teeos),
 
@@ -2022,6 +2024,7 @@ crate::target_spec_enum! {
         VexOs = "vexos",
         VisionOs = "visionos",
         Vita = "vita",
+        Void = "void",
         VxWorks = "vxworks",
         Wasi = "wasi",
         WatchOs = "watchos",

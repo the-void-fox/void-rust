@@ -86,6 +86,10 @@ cfg_select! {
         mod uefi;
         pub use uefi::fill_bytes;
     }
+    target_os = "void" => {
+        mod void;
+        pub use void::fill_bytes;
+    }
     target_os = "vxworks" => {
         mod vxworks;
         pub use vxworks::fill_bytes;

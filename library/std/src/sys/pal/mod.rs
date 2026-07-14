@@ -32,6 +32,10 @@ cfg_select! {
         mod vexos;
         pub use self::vexos::*;
     }
+    target_os = "void" => {
+        mod void;
+        pub use self::void::*;
+    }
     target_os = "wasi" => {
         mod wasi;
         pub use self::wasi::*;

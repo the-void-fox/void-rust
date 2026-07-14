@@ -845,7 +845,8 @@ impl Build {
         }
 
         // If zkvm target, generate memcpy, etc.
-        if target.contains("zkvm") {
+        // void: libc нет — mem-интринсики даёт compiler_builtins (как zkvm).
+        if target.contains("zkvm") || target.contains("void") {
             features.insert("compiler-builtins-mem");
         }
 

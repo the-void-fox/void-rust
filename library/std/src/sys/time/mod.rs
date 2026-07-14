@@ -36,6 +36,16 @@ cfg_select! {
             pub use super::unsupported::{SystemTime, UNIX_EPOCH};
         }
     }
+    target_os = "void" => {
+        mod void;
+        #[expect(unused)]
+        mod unsupported;
+
+        mod imp {
+            pub use super::void::Instant;
+            pub use super::unsupported::{SystemTime, UNIX_EPOCH};
+        }
+    }
     target_os = "windows" => {
         mod windows;
         use windows as imp;

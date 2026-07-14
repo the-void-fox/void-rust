@@ -34,6 +34,7 @@ fn main() {
         || target_os == "fuchsia"
         || (target_vendor == "fortanix" && target_env == "sgx")
         || target_os == "motor"
+        || target_os == "void"
         || target_os == "hermit"
         || target_os == "trusty"
         || target_os == "l4re"

@@ -37,6 +37,10 @@ cfg_select! {
         mod vexos;
         pub use vexos::*;
     }
+    target_os = "void" => {
+        mod void;
+        pub use void::*;
+    }
     target_os = "xous" => {
         mod xous;
         pub use xous::*;

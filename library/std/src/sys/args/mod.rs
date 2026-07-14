@@ -8,6 +8,7 @@
     target_os = "hermit",
     target_os = "motor",
     target_os = "uefi",
+    target_os = "void",
     target_os = "wasi",
     target_os = "xous",
 ))]
@@ -36,6 +37,10 @@ cfg_select! {
     target_os = "uefi" => {
         mod uefi;
         pub use uefi::*;
+    }
+    target_os = "void" => {
+        mod void;
+        pub use void::*;
     }
     all(target_os = "wasi", target_env = "p1") => {
         mod wasip1;
