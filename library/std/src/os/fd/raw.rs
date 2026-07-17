@@ -7,14 +7,24 @@ use hermit_abi as libc;
 #[cfg(target_os = "motor")]
 use moto_rt::libc;
 
-#[cfg(target_os = "motor")]
+/// VOID: RawFd — слот posixfs. Константы 0/1/2 формальны (stdio в VOID идёт
+/// через SYS_WRITE/SYS_READ, а не через слоты персоналии) — они нужны только
+/// сигнатурам `AsRawFd for Stdin/Stdout/Stderr`.
+#[cfg(target_os = "void")]
+mod libc {
+    pub const STDIN_FILENO: i32 = 0;
+    pub const STDOUT_FILENO: i32 = 1;
+    pub const STDERR_FILENO: i32 = 2;
+}
+
+#[cfg(any(target_os = "motor", target_os = "void"))]
 use super::owned::OwnedFd;
 #[cfg(not(target_os = "trusty"))]
 use crate::fs;
 use crate::io;
 #[cfg(target_os = "hermit")]
 use crate::os::hermit::io::OwnedFd;
-#[cfg(all(not(target_os = "hermit"), not(target_os = "motor")))]
+#[cfg(all(not(target_os = "hermit"), not(target_os = "motor"), not(target_os = "void")))]
 use crate::os::raw;
 #[cfg(all(doc, not(any(target_arch = "wasm32", target_env = "sgx"))))]
 use crate::os::unix::io::AsFd;
@@ -27,10 +37,10 @@ use crate::sys::{AsInner, FromInner, IntoInner};
 
 /// Raw file descriptors.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[cfg(all(not(target_os = "hermit"), not(target_os = "motor")))]
+#[cfg(all(not(target_os = "hermit"), not(target_os = "motor"), not(target_os = "void")))]
 pub type RawFd = raw::c_int;
 #[stable(feature = "rust1", since = "1.0.0")]
-#[cfg(any(target_os = "hermit", target_os = "motor"))]
+#[cfg(any(target_os = "hermit", target_os = "motor", target_os = "void"))]
 pub type RawFd = i32;
 
 /// A trait to extract the raw file descriptor from an underlying object.

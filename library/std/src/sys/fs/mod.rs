@@ -45,6 +45,11 @@ cfg_select! {
         mod vexos;
         use vexos as imp;
     }
+    target_os = "void" => {
+        mod void;
+        use void as imp;
+        pub(crate) use void::close_raw;
+    }
     _ => {
         mod unsupported;
         use unsupported as imp;

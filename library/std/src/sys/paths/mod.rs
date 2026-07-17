@@ -47,6 +47,15 @@ cfg_select! {
         mod windows;
         use windows as imp;
     }
+    target_os = "void" => {
+        mod void;
+        #[expect(dead_code)]
+        mod unsupported;
+        mod imp {
+            pub use super::unsupported::{SplitPaths, split_paths, JoinPathsError, join_paths, current_exe, home_dir};
+            pub use super::void::{getcwd, chdir, temp_dir};
+        }
+    }
     _ => {
         mod unsupported;
         use unsupported as imp;
