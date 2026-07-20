@@ -30,7 +30,6 @@ cfg_select! {
         target_os = "zkvm",
         target_os = "trusty",
         target_os = "vexos",
-        target_os = "void",
     ) => {
         mod no_threads;
         pub use no_threads::{EagerStorage, LazyStorage, thread_local_inner};
@@ -75,6 +74,9 @@ pub(crate) mod destructors {
         _ => {
             mod list;
             pub(super) use list::register;
+            // VOID (Веха 35): native TLS есть, но guard::enable — no-op (нить-выхода-хука
+            // нет, TLS-деструкторы утекают), поэтому run не зовётся именно на этой цели.
+            #[cfg_attr(target_os = "void", allow(unused_imports))]
             pub(crate) use list::run;
         }
     }

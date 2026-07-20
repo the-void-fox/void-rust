@@ -21,6 +21,8 @@ pub unsafe fn register(t: *mut u8, dtor: unsafe extern "C" fn(*mut u8)) {
 ///
 /// May only be run on thread exit to guarantee that there are no live references
 /// to TLS variables while they are destroyed.
+// VOID (Веха 35): guard::enable — no-op, run на этой цели не зовётся (TLS-деструкторы утекают).
+#[cfg_attr(target_os = "void", allow(dead_code))]
 pub unsafe fn run() {
     loop {
         let mut dtors = DTORS.borrow_mut();

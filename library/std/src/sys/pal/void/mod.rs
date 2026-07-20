@@ -5,6 +5,8 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 pub mod abi;
+pub mod futex;
+pub mod tls;
 
 use crate::io;
 
@@ -12,6 +14,9 @@ use crate::io;
 #[cfg(not(test))]
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(_a0: usize, _a1: usize) -> ! {
+    // Веха 35: TLS главной нити — ПЕРВЫМ делом, до любого `#[thread_local]` (его трогает уже
+    // инициализация рантайма: thread::current и т.п.).
+    unsafe { tls::install() };
     unsafe extern "C" {
         fn main(_: isize, _: *const *const u8) -> i32;
     }

@@ -1,4 +1,4 @@
-use crate::spec::{Cc, LinkerFlavor, Lld, Os, PanicStrategy, RelocModel, TargetOptions};
+use crate::spec::{Cc, LinkerFlavor, Lld, Os, PanicStrategy, RelocModel, TargetOptions, TlsModel};
 
 /// VOID: микроядро с персистентным контент-адресуемым объектным store
 /// (https://github.com/voidfox — Code/kernel). Userspace-программы — статические
@@ -8,10 +8,14 @@ pub(crate) fn opts() -> TargetOptions {
     TargetOptions {
         os: Os::Void,
         executables: true,
-        // ELF-загрузчик VOID не обрабатывает ни релокации, ни PT_TLS:
-        // код статический по месту линковки, thread_local в std — "statik"
-        // (потоков нет: ядро планирует процессы, не нити внутри них).
-        has_thread_local: false,
+        // Веха 35 — потоки: `#[thread_local]` через нативный TLS (модель local-exec —
+        // TPREL-смещения резолвит линкер, динамических релокаций нет, ELF-загрузчику
+        // TLS не касается). Рантайм (pal/void/tls.rs) строит per-thread TLS-блок и ставит
+        // указатель нити: `tp` на riscv (Variant I), база `%fs` на x86 (Variant II).
+        has_thread_local: true,
+        // Явно local-exec: программы статические no-PIE, все thread_local — локальные,
+        // GD/IE-релокации (GOT, __tls_get_addr) не нужны и загрузчиком не обрабатываются.
+        tls_model: TlsModel::LocalExec,
         relocation_model: RelocModel::Static,
         position_independent_executables: false,
         static_position_independent_executables: false,

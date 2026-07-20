@@ -14,6 +14,12 @@ pub const SYS_READ: usize = 14;
 pub const SYS_MAP: usize = 17;
 pub const SYS_ARGS: usize = 18;
 pub const SYS_STARTCAP: usize = 19;
+// Веха 35 — нити.
+pub const SYS_THREAD_SPAWN: usize = 23;
+pub const SYS_THREAD_EXIT: usize = 24;
+pub const SYS_THREAD_JOIN: usize = 25;
+pub const SYS_FUTEX: usize = 26;
+pub const SYS_SET_TLS: usize = 27;
 
 /// «Права нет»: и как аргумент SYS_CALL (не передавать capability), и как
 /// ответ SYS_STARTCAP (слот пуст).
@@ -176,6 +182,54 @@ pub fn sys_call(ep: usize, op: usize, send: &[u8], recv: &mut [u8]) -> usize {
 /// Пустой слот — [`NO_CAP`].
 pub fn sys_start_cap(i: usize) -> usize {
     syscall(SYS_STARTCAP, i, 0, 0, 0).0
+}
+
+/// Наносекунд в тик (для перевода futex-таймаутов в единицы `arch::now_ticks` ядра).
+pub const fn tick_ns() -> u64 {
+    TICK_NS
+}
+
+// ─── нити (Веха 35) ───────────────────────────────────────────────────────────
+
+/// `SYS_THREAD_SPAWN(entry, arg, stack_top)` -> id нити | MAX. Нить исполняет
+/// `entry(arg)` на стеке `stack_top` в том же адресном пространстве и домене.
+pub fn sys_thread_spawn(entry: usize, arg: usize, stack_top: usize) -> usize {
+    syscall(SYS_THREAD_SPAWN, entry, arg, stack_top, 0).0
+}
+
+/// `SYS_THREAD_EXIT(retval)` — завершить текущую нить (не процесс).
+pub fn sys_thread_exit(retval: usize) -> ! {
+    #[cfg(target_arch = "riscv64")]
+    unsafe {
+        core::arch::asm!("ecall", in("a7") SYS_THREAD_EXIT, in("a0") retval,
+            options(nostack, noreturn))
+    }
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        core::arch::asm!("int 0x80", in("rax") SYS_THREAD_EXIT, in("rdi") retval,
+            options(nostack, noreturn))
+    }
+}
+
+/// `SYS_THREAD_JOIN(tid)` -> retval нити | MAX.
+pub fn sys_thread_join(tid: usize) -> usize {
+    syscall(SYS_THREAD_JOIN, tid, 0, 0, 0).0
+}
+
+/// `SYS_FUTEX` WAIT(uaddr, expected, timeout_ticks): уснуть, пока `*uaddr == expected`.
+/// `timeout_ticks` == 0 — бессрочно. Возврат: 0 — разбужены, 1 — таймаут.
+pub fn sys_futex_wait(uaddr: *const u32, expected: u32, timeout_ticks: usize) -> usize {
+    syscall(SYS_FUTEX, 0, uaddr as usize, expected as usize, timeout_ticks).0
+}
+
+/// `SYS_FUTEX` WAKE(uaddr, count): разбудить до `count` спящих; вернуть число.
+pub fn sys_futex_wake(uaddr: *const u32, count: usize) -> usize {
+    syscall(SYS_FUTEX, 1, uaddr as usize, count, 0).0
+}
+
+/// `SYS_SET_TLS(ptr)` — задать TLS-указатель нити (tp / база %fs).
+pub fn sys_set_tls(ptr: usize) {
+    syscall(SYS_SET_TLS, ptr, 0, 0, 0);
 }
 
 /// Монотонное время из U-mode (не syscall): rdtime / rdtsc, пересчитанные в нс.

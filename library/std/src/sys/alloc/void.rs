@@ -9,14 +9,33 @@
 //! так что любая дырка вмещает свой 16-байтный заголовок.
 //!
 //! Арена по-прежнему ленивая: страницы приходят от ядра по фактическому
-//! касанию, нетронутый резерв ничего не стоит. Потоков в VOID нет — состояние
-//! в `SyncUnsafeCell` без блокировки (как wasm без атомиков); alloc не
-//! реентерабелен (сам памяти не просит).
+//! касанию, нетронутый резерв ничего не стоит.
+//!
+//! Веха 35 — потоки: список дырок теперь под спин-локом [`LOCK`] (нити вытесняют
+//! друг друга, одновременный alloc/dealloc иначе портил бы free-list). Лок сырой,
+//! НЕ std-Mutex: тот сам стоит на futex, а futex/thread_local могут просить память —
+//! была бы рекурсия. На контеншене уступаем квант (`SYS_YIELD`); alloc короткий.
 
 use crate::alloc::{GlobalAlloc, Layout, System};
 use crate::cell::SyncUnsafeCell;
 use crate::ptr::with_exposed_provenance_mut;
+use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::sys::pal::abi;
+
+/// Спин-лок free-list. `false` — свободен. Держится лишь на время правки списка.
+static LOCK: AtomicBool = AtomicBool::new(false);
+
+#[inline]
+fn lock() {
+    while LOCK.swap(true, Ordering::Acquire) {
+        abi::sys_yield(); // держатель на другом кванте — уступить ему CPU (SMP нет)
+    }
+}
+
+#[inline]
+fn unlock() {
+    LOCK.store(false, Ordering::Release);
+}
 
 /// Ленивый резерв: страницы выделяются ядром только по фактическому касанию.
 const ARENA_SIZE: usize = 16 * 1024 * 1024;
@@ -149,15 +168,19 @@ unsafe fn heap_dealloc(ptr: *mut u8, layout: Layout) {
 unsafe impl GlobalAlloc for System {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        unsafe { heap_alloc(layout) }
+        lock();
+        let p = unsafe { heap_alloc(layout) };
+        unlock();
+        p
     }
 
     // alloc_zeroed/realloc — дефолтные (alloc + обнуление / alloc + копия +
-    // dealloc): память теперь переиспользуется, «страницы приходят нулями»
-    // больше не аргумент.
+    // dealloc): каждый берёт лок сам, рекурсии нет.
 
     #[inline]
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { heap_dealloc(ptr, layout) }
+        lock();
+        unsafe { heap_dealloc(ptr, layout) };
+        unlock();
     }
 }
