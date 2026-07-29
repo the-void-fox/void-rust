@@ -20,6 +20,9 @@ pub const SYS_THREAD_EXIT: usize = 24;
 pub const SYS_THREAD_JOIN: usize = 25;
 pub const SYS_FUTEX: usize = 26;
 pub const SYS_SET_TLS: usize = 27;
+/// Веха 86 — настоящие часы и случайность ядра.
+pub const SYS_TIME: usize = 36;
+pub const SYS_RANDOM: usize = 37;
 
 /// «Права нет»: и как аргумент SYS_CALL (не передавать capability), и как
 /// ответ SYS_STARTCAP (слот пуст).
@@ -230,6 +233,19 @@ pub fn sys_futex_wake(uaddr: *const u32, count: usize) -> usize {
 /// `SYS_SET_TLS(ptr)` — задать TLS-указатель нити (tp / база %fs).
 pub fn sys_set_tls(ptr: usize) {
     syscall(SYS_SET_TLS, ptr, 0, 0, 0);
+}
+
+/// `SYS_TIME(0)` — настенное время, наносекунды Unix (Веха 86). Ядро читает часы платформы
+/// (CMOS RTC / goldfish-rtc) на загрузке и ведёт время от монотонного счётчика. Часов на машине
+/// нет — вернётся время от эпохи Unix, то есть фактически uptime.
+pub fn sys_time_ns() -> u64 {
+    syscall(SYS_TIME, 0, 0, 0, 0).0 as u64
+}
+
+/// `SYS_RANDOM(buf, len)` — случайные байты от ядра (аппаратный ГСЧ + пул событий).
+/// Возвращает число заполненных байт; `usize::MAX` — буфер недоступен.
+pub fn sys_random(buf: &mut [u8]) -> usize {
+    syscall(SYS_RANDOM, buf.as_mut_ptr() as usize, buf.len(), 0, 0).0
 }
 
 /// Монотонное время из U-mode (не syscall): rdtime / rdtsc, пересчитанные в нс.

@@ -1,12 +1,18 @@
 //! Монотонное время VOID: rdtime/rdtsc из U-mode (ядро открывает счётчики
 //! процессам), в наносекундах через TICK_NS.
 //!
-//! SystemTime (Веха 32 — ls из uutils зовёт `SystemTime::now`) — те же
-//! счётчики: RTC в VOID не читается, «настенные часы» = ФИКТИВНАЯ база
-//! (2026-07-01T00:00:00Z) + время с загрузки. Дата неверна, но арифметика
-//! жива: софт вроде ls делает `now − 6 месяцев`, и с базой около нуля это
-//! паника на underflow. Порядок и разности в пределах сессии корректны;
-//! mtime у файлов персоналия всё равно не хранит (modified() — unsupported).
+//! SystemTime (Веха 32 — ls из uutils зовёт `SystemTime::now`) — **настоящие
+//! часы с Вехи 86**: `SYS_TIME` отдаёт время, которое ядро прочитало у
+//! платформы на загрузке (CMOS RTC на x86, goldfish-rtc на riscv) и ведёт от
+//! монотонного счётчика. Раньше здесь была ФИКТИВНАЯ база (2026-07-01) плюс
+//! uptime — дата была заведомо неверной.
+//!
+//! Если часов на машине нет, ядро честно отдаёт время от эпохи Unix (то есть
+//! uptime) — дата будет «1970». Осторожно: софт вроде ls вычитает из `now`
+//! месяцы, и у времени около нуля такая арифметика уходит в underflow (ровно
+//! ради этого до Вехи 86 здесь стояла выдуманная база). На машинах с RTC —
+//! а это все, где мы загружаемся, — вопрос снят. mtime у файлов персоналия
+//! пока не хранит (modified() — unsupported).
 
 use crate::sys::pal::abi;
 use crate::time::Duration;
@@ -37,15 +43,14 @@ pub struct SystemTime(Duration);
 
 pub const UNIX_EPOCH: SystemTime = SystemTime(Duration::ZERO);
 
-/// Фиктивная база часов: 2026-07-01T00:00:00Z в секундах Unix.
-const WALL_BASE_SECS: u64 = 1_782_864_000;
+// Веха 86: фиктивной базы больше нет — настенное время приходит из ядра (`SYS_TIME`).
 
 impl SystemTime {
     pub const MAX: SystemTime = SystemTime(Duration::MAX);
     pub const MIN: SystemTime = SystemTime(Duration::ZERO);
 
     pub fn now() -> SystemTime {
-        SystemTime(Duration::from_secs(WALL_BASE_SECS) + Duration::from_nanos(abi::now_ns()))
+        SystemTime(Duration::from_nanos(abi::sys_time_ns()))
     }
 
     pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {
