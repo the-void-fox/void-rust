@@ -33,7 +33,7 @@ use crate::vec::Vec;
 #[expect(dead_code)]
 #[path = "unsupported.rs"]
 mod unsupported_fs;
-pub use unsupported_fs::{Dir, DirBuilder, FileTimes, link, readlink, remove_dir_all, rmdir, symlink};
+pub use unsupported_fs::{Dir, FileTimes, link, readlink, symlink};
 
 pub use crate::sys::fs::common::{copy, exists};
 
@@ -48,6 +48,7 @@ const OP_UNLINK: usize = 5;
 const OP_READDIR: usize = 6;
 const OP_SEEK: usize = 7;
 const OP_RENAME: usize = 8;
+const OP_MKDIR: usize = 9;
 
 const O_APPEND: usize = 1 << 0;
 const O_TRUNC: usize = 1 << 1;
@@ -61,7 +62,7 @@ const MSG_MAX: usize = 512;
 /// Предел размера файла в персоналии v1.
 const DATA_MAX: usize = 4096;
 /// Предел длины имени у сервера.
-const NAME_MAX: usize = 32;
+const NAME_MAX: usize = 255;
 
 /// Эндпоинт персоналии — стартовая capability, слот 0 (наследуется от vsh).
 fn fs_ep() -> io::Result<usize> {
@@ -107,7 +108,7 @@ fn root_name(path: &Path) -> io::Result<Option<&str>> {
     if s.len() > NAME_MAX {
         return Err(io::const_error!(
             io::ErrorKind::InvalidFilename,
-            "имя длиннее 32 байт (предел посикс-персоналии v1)",
+            "путь длиннее 255 байт (предел одного запроса персоналии)",
         ));
     }
     Ok(Some(s))
@@ -648,6 +649,71 @@ pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
     }
     if rep[0] != 0 {
         return Err(io::const_error!(io::ErrorKind::NotFound, "нет такого файла"));
+    }
+    Ok(())
+}
+
+/// Веха 176 — создание каталога. До неё `std::fs::create_dir` был `unsupported`, хотя каталоги у
+/// персоналии есть с Вехи 44: просто никто не связал одно с другим.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct DirBuilder {}
+
+impl DirBuilder {
+    pub fn new() -> DirBuilder {
+        DirBuilder {}
+    }
+
+    pub fn mkdir(&self, p: &Path) -> io::Result<()> {
+        let name = file_name(p)?;
+        let ep = fs_ep()?;
+        let mut rep = [0u8; 1];
+        let n = abi::sys_call(ep, OP_MKDIR, name.as_bytes(), &mut rep);
+        if n != 1 {
+            return Err(err_ipc());
+        }
+        if rep[0] != 0 {
+            return Err(io::const_error!(
+                io::ErrorKind::AlreadyExists,
+                "каталог уже есть либо нет родителя",
+            ));
+        }
+        Ok(())
+    }
+
+    // `set_mode` здесь нет намеренно: его требует только `std::os::unix::fs::DirBuilderExt`, а
+    // юниксового расширения у VOID нет — прав у файлов нет вовсе (нет ни пользователей, ни root).
+    // Это дизайн, а не пробел; лишний метод компилятор честно назвал бы мёртвым кодом.
+}
+
+/// Снять ПУСТОЙ каталог.
+pub fn rmdir(p: &Path) -> io::Result<()> {
+    let name = file_name(p)?;
+    let ep = fs_ep()?;
+    let mut rep = [0u8; 1];
+    let n = abi::sys_call(ep, OP_UNLINK, name.as_bytes(), &mut rep);
+    if n != 1 {
+        return Err(err_ipc());
+    }
+    if rep[0] != 0 {
+        return Err(io::const_error!(io::ErrorKind::DirectoryNotEmpty, "каталог не пуст"));
+    }
+    Ok(())
+}
+
+/// Снять каталог ВМЕСТЕ С СОДЕРЖИМЫМ (Веха 175 — режим 1 у `unlink`).
+///
+/// Рекурсию делает СЕРВЕР одним обходом, а не std своим циклом по `read_dir`: у персоналии пути
+/// живут именами корней store, и обойти поддерево у неё дешевле и честнее, чем гонять сотню IPC.
+pub fn remove_dir_all(p: &Path) -> io::Result<()> {
+    let name = file_name(p)?;
+    let ep = fs_ep()?;
+    let mut rep = [0u8; 1];
+    let n = abi::sys_call(ep, OP_UNLINK | (1 << 16), name.as_bytes(), &mut rep);
+    if n != 1 {
+        return Err(err_ipc());
+    }
+    if rep[0] != 0 {
+        return Err(io::const_error!(io::ErrorKind::NotFound, "нет такого каталога"));
     }
     Ok(())
 }
