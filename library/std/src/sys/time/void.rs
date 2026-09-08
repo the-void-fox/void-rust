@@ -11,8 +11,8 @@
 //! uptime) — дата будет «1970». Осторожно: софт вроде ls вычитает из `now`
 //! месяцы, и у времени около нуля такая арифметика уходит в underflow (ровно
 //! ради этого до Вехи 86 здесь стояла выдуманная база). На машинах с RTC —
-//! а это все, где мы загружаемся, — вопрос снят. mtime у файлов персоналия
-//! пока не хранит (modified() — unsupported).
+//! а это все, где мы загружаемся, — вопрос снят. С Вехи 177 персоналия хранит
+//! и mtime: `modified()` работает, если время у записи есть.
 
 use crate::sys::pal::abi;
 use crate::time::Duration;
@@ -51,6 +51,12 @@ impl SystemTime {
 
     pub fn now() -> SystemTime {
         SystemTime(Duration::from_nanos(abi::sys_time_ns()))
+    }
+
+    /// Веха 177 — время, названное персоналией: наносекунды от эпохи Unix. Тем же счётом, что
+    /// отдаёт `SYS_TIME`, потому что персоналия его оттуда и берёт.
+    pub fn from_unix_nanos(ns: u64) -> SystemTime {
+        SystemTime(Duration::from_nanos(ns))
     }
 
     pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {

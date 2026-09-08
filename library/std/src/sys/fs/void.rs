@@ -6,10 +6,10 @@
 //! (`Code/programs/user/src/lib.rs`): op = opcode | fd<<8 | mode<<16,
 //! нагрузка и ответ ≤ 512 байт за вызов.
 //!
-//! Персоналия v1 плоская: один корневой каталог, файл ≤ 4 КиБ, имя ≤ 32 байт
-//! (слэши внутри имени легальны — `bin/riscv64/hello` это ИМЯ корня store).
-//! Каталогов, симлинков, прав и времён нет — соответствующие операции честно
-//! возвращают unsupported. `close` у сервера — атомарный коммит файла в store.
+//! Каталоги есть (Вехи 44, 176: `create_dir`/`rmdir`/`remove_dir_all`), время
+//! последнего изменения есть (Веха 177: `modified()`); симлинков и прав нет и
+//! не будет — в VOID нет ни пользователей, ни root, и `chmod` заводить не над
+//! чем. `close` у сервера — атомарный коммит файла в store.
 //!
 //! `RawFd` (для `std::os::fd`, его ждёт uutils) — номер слота у сервера;
 //! [`FileDesc`] владеет слотом и закрывает его в Drop. Конверсия через
@@ -142,12 +142,17 @@ impl Drop for FileDesc {
     }
 }
 
-pub struct File(FileDesc);
+/// Второе поле — ИМЯ, под которым файл открывали (Веха 177). Нужно `file_attr`: время лежит у
+/// каталога, а не у слота, и спросить его можно только по имени. У файла, пришедшего из
+/// `OwnedFd`, имени нет — там `None`.
+pub struct File(FileDesc, Option<String>);
 
+/// Веха 177: `mtime` — наносекунды Unix, 0 значит «времени у записи нет» (её положила система
+/// прежних версий либо это каталог дерева пакета, где времён не бывает вовсе).
 #[derive(Clone)]
 pub enum FileAttr {
-    Dir,
-    File { size: u64 },
+    Dir { mtime: u64 },
+    File { size: u64, mtime: u64 },
 }
 
 pub struct ReadDir {
@@ -179,8 +184,8 @@ pub struct FileType {
 impl FileAttr {
     pub fn size(&self) -> u64 {
         match self {
-            Self::File { size } => *size,
-            Self::Dir => 0,
+            Self::File { size, .. } => *size,
+            Self::Dir { .. } => 0,
         }
     }
 
@@ -189,17 +194,38 @@ impl FileAttr {
     }
 
     pub fn file_type(&self) -> FileType {
-        FileType { is_dir: matches!(self, FileAttr::Dir) }
+        FileType { is_dir: matches!(self, FileAttr::Dir { .. }) }
     }
 
+    /// Наносекунды Unix; 0 — времени нет.
+    fn mtime_ns(&self) -> u64 {
+        match self {
+            Self::File { mtime, .. } | Self::Dir { mtime } => *mtime,
+        }
+    }
+
+    /// Веха 177 — время последнего изменения. Отказ, если времени у записи НЕТ: ноль здесь
+    /// значит «неизвестно», и отдавать его как 1 января 1970 года было бы выдумкой — а на ней
+    /// строятся вычитания вроде «сколько дней назад» и уходят в underflow.
     pub fn modified(&self) -> io::Result<SystemTime> {
-        unsupported()
+        let ns = self.mtime_ns();
+        if ns == 0 {
+            return Err(io::const_error!(
+                io::ErrorKind::Unsupported,
+                "времени у этой записи нет"
+            ));
+        }
+        Ok(SystemTime::from_unix_nanos(ns))
     }
 
+    /// Времени ЧТЕНИЯ персоналия не ведёт и вести не собирается: atime означает запись на диск
+    /// при каждом открытии файла, и весь мир его в итоге отключает (`noatime`).
     pub fn accessed(&self) -> io::Result<SystemTime> {
         unsupported()
     }
 
+    /// Времени СОЗДАНИЯ отдельно от изменения нет: у записи одно время, и оно ставится и при
+    /// создании, и при записи.
     pub fn created(&self) -> io::Result<SystemTime> {
         unsupported()
     }
@@ -338,7 +364,8 @@ impl File {
                 "нет свободных слотов у posixfs",
             ));
         }
-        let file = File(FileDesc { fd: rep[0] as RawFd, pos: Cell::new(0) });
+        let file =
+            File(FileDesc { fd: rep[0] as RawFd, pos: Cell::new(0) }, Some(String::from(name)));
         if opts.append {
             // Сервер поставил курсор в конец — узнать его (и размер) честно.
             file.seek_ipc(0, SEEK_CUR)?;
@@ -373,7 +400,14 @@ impl File {
         let cur = self.seek_ipc(0, SEEK_CUR)?;
         let size = self.seek_ipc(0, SEEK_END)?;
         self.seek_ipc(cur as i64, SEEK_SET)?;
-        Ok(FileAttr::File { size })
+        // Веха 177 — время спрашивается ПО ИМЕНИ: слот сервера о времени ничего не знает (оно
+        // живёт у родительского каталога, а не у дескриптора). Имени нет — файл пришёл из
+        // `OwnedFd`, и тогда время честно неизвестно, а размер всё равно верен.
+        let mtime = match &self.1 {
+            Some(name) => stat_name(name).map(|a| a.mtime_ns()).unwrap_or(0),
+            None => 0,
+        };
+        Ok(FileAttr::File { size, mtime })
     }
 
     pub fn fsync(&self) -> io::Result<()> {
@@ -581,7 +615,7 @@ impl IntoInner<FileDesc> for File {
 
 impl FromInner<FileDesc> for File {
     fn from_inner(fd: FileDesc) -> File {
-        File(fd)
+        File(fd, None) // имени у сырого дескриптора нет — см. `File`
     }
 }
 
@@ -732,21 +766,31 @@ pub fn set_times_nofollow(_p: &Path, _times: FileTimes) -> io::Result<()> {
 
 pub fn stat(p: &Path) -> io::Result<FileAttr> {
     match root_name(p)? {
-        None => Ok(FileAttr::Dir),
-        Some(name) => {
-            let ep = fs_ep()?;
-            let mut rep = [0u8; 5];
-            let n = abi::sys_call(ep, OP_STAT, name.as_bytes(), &mut rep);
-            if n != 5 {
-                return Err(err_ipc());
-            }
-            if rep[0] == 0 {
-                return Err(io::const_error!(io::ErrorKind::NotFound, "нет такого файла"));
-            }
-            let size = u32::from_le_bytes(rep[1..5].try_into().unwrap()) as u64;
-            Ok(FileAttr::File { size })
-        }
+        None => Ok(FileAttr::Dir { mtime: 0 }),
+        Some(name) => stat_name(name),
     }
+}
+
+/// `stat` по ИМЕНИ. Отдельно от [`stat`] потому, что этим же путём спрашивает открытый файл: имя
+/// у него есть, а `fstat`'а в протоколе нет.
+fn stat_name(name: &str) -> io::Result<FileAttr> {
+    let ep = fs_ep()?;
+    // Ответ сервера рос дважды: 5 байт → 7 (тип записи, Веха 108.2) → 15 (время, Веха 177).
+    // Читаем сколько дали: короткий ответ значит сервер прежних версий, а не ошибку.
+    let mut rep = [0u8; 15];
+    let n = abi::sys_call(ep, OP_STAT, name.as_bytes(), &mut rep);
+    if n == usize::MAX || n < 5 {
+        return Err(err_ipc());
+    }
+    if rep[0] == 0 {
+        return Err(io::const_error!(io::ErrorKind::NotFound, "нет такого файла"));
+    }
+    let size = u32::from_le_bytes(rep[1..5].try_into().unwrap()) as u64;
+    let mtime = if n >= 15 { u64::from_le_bytes(rep[7..15].try_into().unwrap()) } else { 0 };
+    // Каталог от файла отличает ШЕСТОЙ байт. До Вехи 177 его здесь не читали вовсе, и
+    // `metadata("/etc").is_dir()` отвечал «нет»: для std каталогов не существовало, хотя
+    // персоналия завела их ещё Вехой 44.
+    if n >= 6 && rep[5] != 0 { Ok(FileAttr::Dir { mtime }) } else { Ok(FileAttr::File { size, mtime }) }
 }
 
 pub fn lstat(p: &Path) -> io::Result<FileAttr> {
